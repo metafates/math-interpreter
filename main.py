@@ -299,7 +299,13 @@ def calc(expression):
     return result
 
 
-while True:
-    expression = input('>>> ')
-    res = calc(expression)
-    print(res.value)
+def main(): 
+    while True:
+        expression = input('>>> ')
+        res = calc(expression)
+        print(res.value)
+
+
+if __name__ == "__main__":
+    main()
+    
