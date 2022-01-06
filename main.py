@@ -146,6 +146,7 @@ Grammar (from highest priority to lowest)
 
 factor  : ((PLUS | MINUS) (INT | FLOAT))
         : INT | FLOAT
+        : LPAREN expr RPAREN
 
 term    : factor ((MUL | DIV) factor)
 
