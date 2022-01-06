@@ -299,6 +299,7 @@ def calc(expression):
     return result
 
 
-exp = '2598 / 2 + 4 * (2 - 2)'
-res = calc(exp)
-print(res.value, type(res.value))
+while True:
+    expression = input('>>> ')
+    res = calc(expression)
+    print(res.value)
