@@ -12,6 +12,8 @@ class TT(Enum):
     MINUS = 'MINUS'
     MUL = 'MUL'
     DIV = 'DIV'
+    REM = 'REM'
+    POW = 'POW'
     EOF = 'EOF'
     EQ = 'EQ'
     VAR = 'VAR'
@@ -28,6 +30,8 @@ OPERATORS = {
     '-': TT.MINUS,
     '*': TT.MUL,
     '/': TT.DIV,
+    '^': TT.POW,
+    '%': TT.REM,
     '(': TT.LPAREN,
     ')': TT.RPAREN,
     '=': TT.EQ
@@ -51,10 +55,10 @@ class Token:
 
 # LEXER
 class Lexer:
-    def __init__(self, text: str):
-        self.pos = 0
-        self.text = text
-        self.char = text[0]
+    def __init__(self):
+        self.pos = -1
+        self.text = ''
+        self.char = ''
 
     def advance(self) -> Lexer:
         self.pos += 1
@@ -66,7 +70,11 @@ class Lexer:
         self.char = self.text[self.pos]
         return self
 
-    def tokenize(self) -> list[Token]:
+    def tokenize(self, expression: str) -> list[Token]:
+        self.text = expression
+        self.pos = -1
+        self.advance()
+
         tokens = []
         eof = Token(TT.EOF)
         while self.char is not None:
@@ -166,20 +174,29 @@ Grammar (from highest priority to lowest)
 factor  : ((PLUS | MINUS) (INT | FLOAT))
         : INT | FLOAT
 
-term    : factor ((MUL | DIV) factor)
+term    : factor ((MUL | DIV | POW | REM) factor)
 
 expr    : term ((PLUS | MINUS) term)
+        : var EQ expr
 """
 
 
 class Parser:
-    def __init__(self, tokens: list[Token]):
-        self.tokens = tokens
-        self.pos = 0
-        self.token = tokens[self.pos]
+    def __init__(self):
+        self.tokens = []
+        self.pos = -1
+        self.token = None
 
-    def parse(self):
-        return self.expr()
+    def parse(self, tokens: list[Token]):
+        self.pos = -1
+        self.tokens = tokens
+        self.advance()
+
+        expr = self.expr()
+        if self.token.type is not TT.EOF:
+            raise Exception('Invalid syntax')
+
+        return expr
 
     def advance(self) -> Parser:
         self.pos += 1
@@ -213,10 +230,10 @@ class Parser:
             self.advance()
             return NumberNode(token)
 
-        elif token.type == TT.LPAREN:
+        elif token.type is TT.LPAREN:
             self.advance()
             expr = self.expr()
-            if self.token.type == TT.RPAREN:
+            if self.token.type is TT.RPAREN:
                 self.advance()
                 return expr
 
@@ -225,14 +242,14 @@ class Parser:
             return VarNode(token)
 
     def term(self) -> Node:
-        operators = [TT.MUL, TT.DIV]
+        operators = [TT.MUL, TT.DIV, TT.POW, TT.REM]
         return self.bin_op(self.factor, operators)
 
     def expr(self) -> Node:
-        if self.token.type == TT.VAR:
+        if self.token.type is TT.VAR:
             var_token = self.token
             self.advance()
-            if self.token.type == TT.EQ:
+            if self.token.type is TT.EQ:
                 eq = self.token
                 self.advance()
                 expr = self.expr()
@@ -271,17 +288,23 @@ class Value:
     def __repr__(self):
         return self.__str__()
 
-    def __add__(self, other: Number | Variable):
+    def __add__(self, other: Value):
         return Number(self.value + other.value)
 
-    def __sub__(self, other: Number | Variable):
+    def __sub__(self, other: Value):
         return Number(self.value - other.value)
 
-    def __mul__(self, other: Number | Variable):
+    def __mul__(self, other: Value):
         return Number(self.value * other.value)
 
-    def __truediv__(self, other: Number | Variable):
+    def __truediv__(self, other: Value):
         return Number(self.value / other.value)
+
+    def __mod__(self, other: Value):
+        return Number(self.value % other.value)
+
+    def __pow__(self, other: Value, modulo=None):
+        return Number(self.value ** other.value)
 
 
 class Variable(Value):
@@ -302,14 +325,14 @@ class Number(Value):
 # Interpreter
 class Interpreter:
     def __init__(self):
-        self.node = None
         self.variables: dict[str, Variable] = dict()
+        self.lexer = Lexer()
+        self.parser = Parser()
 
-    def set_node(self, node: Node):
-        self.node = node
-
-    def compute(self) -> Value:
-        return self.__visit(self.node)
+    def input(self, expression: str) -> any:
+        tokens = self.lexer.tokenize(expression)
+        ast = self.parser.parse(tokens)
+        return self.__visit(ast).value
 
     def __visit(self, node: Node) -> Number | Variable:
         if isinstance(node, NumberNode):
@@ -341,38 +364,29 @@ class Interpreter:
         left = self.__visit(node.left)
         right = self.__visit(node.right)
         op = node.token
-        if op.type == TT.PLUS:
+        if op.type is TT.PLUS:
             return left + right
-        if op.type == TT.MINUS:
+        if op.type is TT.MINUS:
             return left - right
-        if op.type == TT.DIV:
+        if op.type is TT.DIV:
             return left / right
-        if op.type == TT.MUL:
+        if op.type is TT.MUL:
             return left * right
-        if op.type == TT.EQ:
+        if op.type is TT.REM:
+            return left % right
+        if op.type is TT.POW:
+            return left ** right
+        if op.type is TT.EQ:
             self.variables[left.name] = left.set_value(right.value)
             return right
-
-
-def get_ast(expression):
-    # make tokens
-    lexer = Lexer(expression)
-    tokens = lexer.tokenize()
-
-    # generate ast
-    parser = Parser(tokens)
-    ast = parser.parse()
-
-    return ast
 
 
 def main():
     interpreter = Interpreter()
     while True:
         expression = input('>>> ')
-        ast = get_ast(expression)
-        interpreter.set_node(ast)
-        print(interpreter.compute())
+        res = interpreter.input(expression)
+        print(res)
 
 
 if __name__ == '__main__':

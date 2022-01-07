@@ -10,6 +10,6 @@ No error handling tho, and it will probably break if anything isn't perfect
 
 `[x]` Add variables support
 
-`[ ]` Add rem and pow operators
+`[x]` Add rem and pow operators
 
 `[ ]` Add Support unicode variable names
