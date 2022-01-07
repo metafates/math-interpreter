@@ -13,6 +13,8 @@ class TT(Enum):
     MUL = 'MUL'
     DIV = 'DIV'
     EOF = 'EOF'
+    EQ = 'EQ'
+    VAR = 'VAR'
     LPAREN = 'LPAREN'
     RPAREN = 'RPAREN'
 
@@ -20,18 +22,19 @@ class TT(Enum):
 # Constants
 DIGITS = string.digits
 BLANK = string.whitespace
+LETTERS = string.ascii_letters
 OPERATORS = {
     '+': TT.PLUS,
     '-': TT.MINUS,
     '*': TT.MUL,
     '/': TT.DIV,
     '(': TT.LPAREN,
-    ')': TT.RPAREN
+    ')': TT.RPAREN,
+    '=': TT.EQ
 }
 
 
 # TOKEN
-
 class Token:
     def __init__(self, token_type: TT, token_value: Optional[str | int | float] = None):
         self.type = token_type
@@ -47,7 +50,6 @@ class Token:
 
 
 # LEXER
-
 class Lexer:
     def __init__(self, text: str):
         self.pos = 0
@@ -85,6 +87,11 @@ class Lexer:
                     token = Token(TT.INT, num)
 
                 tokens.append(token)
+            elif self.char in LETTERS + '_':
+                varname = self.make_varname()
+                token = Token(TT.VAR, varname)
+                tokens.append(token)
+
         tokens.append(eof)
         return tokens
 
@@ -102,6 +109,13 @@ class Lexer:
             self.advance()
 
         return float(num) if dot else int(num)
+
+    def make_varname(self) -> str:
+        varname = ''
+        while self.char is not None and self.char in LETTERS + DIGITS + '_':
+            varname += self.char
+            self.advance()
+        return varname
 
 
 # NODES
@@ -130,6 +144,11 @@ class NumberNode(Node):
         super().__init__(token)
 
 
+class VarNode(Node):
+    def __init__(self, token: Token):
+        super().__init__(token)
+
+
 class BinOpNode(Node):
     def __init__(self, left: Node, op: Token, right: Node):
         super().__init__(op)
@@ -146,7 +165,6 @@ Grammar (from highest priority to lowest)
 
 factor  : ((PLUS | MINUS) (INT | FLOAT))
         : INT | FLOAT
-        : LPAREN expr RPAREN
 
 term    : factor ((MUL | DIV) factor)
 
@@ -165,6 +183,16 @@ class Parser:
 
     def advance(self) -> Parser:
         self.pos += 1
+
+        if self.pos >= len(self.tokens):
+            self.token = None
+            return self
+
+        self.token = self.tokens[self.pos]
+        return self
+
+    def goback(self) -> Parser:
+        self.pos -= 1
 
         if self.pos >= len(self.tokens):
             self.token = None
@@ -192,11 +220,26 @@ class Parser:
                 self.advance()
                 return expr
 
+        elif token.type == TT.VAR:
+            self.advance()
+            return VarNode(token)
+
     def term(self) -> Node:
         operators = [TT.MUL, TT.DIV]
         return self.bin_op(self.factor, operators)
 
     def expr(self) -> Node:
+        if self.token.type == TT.VAR:
+            var_token = self.token
+            self.advance()
+            if self.token.type == TT.EQ:
+                eq = self.token
+                self.advance()
+                expr = self.expr()
+                var = VarNode(var_token)
+                return BinOpNode(var, eq, expr)
+            self.goback()
+
         operators = [TT.PLUS, TT.MINUS]
         return self.bin_op(self.term, operators)
 
@@ -218,44 +261,69 @@ class Parser:
 
 
 # Value types
-class Number:
-    def __init__(self, value: int | float):
+class Value:
+    def __init__(self, value: any):
         self.value = value
-
-    def __add__(self, other: Number):
-        return Number(self.value + other.value)
-
-    def __sub__(self, other: Number):
-        return Number(self.value - other.value)
-
-    def __mul__(self, other: Number):
-        return Number(self.value * other.value)
-
-    def __truediv__(self, other: Number):
-        return Number(self.value / other.value)
-
-    def __repr__(self):
-        return self.value
 
     def __str__(self):
         return str(self.value)
 
+    def __repr__(self):
+        return self.__str__()
+
+    def __add__(self, other: Number | Variable):
+        return Number(self.value + other.value)
+
+    def __sub__(self, other: Number | Variable):
+        return Number(self.value - other.value)
+
+    def __mul__(self, other: Number | Variable):
+        return Number(self.value * other.value)
+
+    def __truediv__(self, other: Number | Variable):
+        return Number(self.value / other.value)
+
+
+class Variable(Value):
+    def __init__(self, name: str):
+        super().__init__(None)
+        self.name = name
+
+    def set_value(self, value: int | float) -> Variable:
+        self.value = value
+        return self
+
+
+class Number(Value):
+    def __init__(self, value: int | float):
+        super().__init__(value)
+
 
 # Interpreter
 class Interpreter:
-    def __init__(self, node: Node):
+    def __init__(self):
+        self.node = None
+        self.variables: dict[str, Variable] = dict()
+
+    def set_node(self, node: Node):
         self.node = node
 
-    def compute(self) -> Number:
+    def compute(self) -> Value:
         return self.__visit(self.node)
 
-    def __visit(self, node: Node) -> Number:
+    def __visit(self, node: Node) -> Number | Variable:
         if isinstance(node, NumberNode):
             return self.__visitNumberNode(node)
         if isinstance(node, BinOpNode):
             return self.__visitBinOpNode(node)
         if isinstance(node, UnaryOpNode):
             return self.__visitUnaryOpNode(node)
+        if isinstance(node, VarNode):
+            return self.__visitVarNode(node)
+
+    def __visitVarNode(self, node: VarNode) -> Variable:
+        varname = node.token.value
+        return self.variables[varname] if varname in self.variables else Variable(varname)
 
     def __visitNumberNode(self, node: NumberNode) -> Number:
         return Number(node.token.value)
@@ -273,7 +341,6 @@ class Interpreter:
         left = self.__visit(node.left)
         right = self.__visit(node.right)
         op = node.token
-
         if op.type == TT.PLUS:
             return left + right
         if op.type == TT.MINUS:
@@ -282,9 +349,12 @@ class Interpreter:
             return left / right
         if op.type == TT.MUL:
             return left * right
+        if op.type == TT.EQ:
+            self.variables[left.name] = left.set_value(right.value)
+            return right
 
 
-def calc(expression):
+def get_ast(expression):
     # make tokens
     lexer = Lexer(expression)
     tokens = lexer.tokenize()
@@ -293,20 +363,17 @@ def calc(expression):
     parser = Parser(tokens)
     ast = parser.parse()
 
-    # get result
-    interpreter = Interpreter(ast)
-    result = interpreter.compute()
-
-    return result
+    return ast
 
 
-def main(): 
+def main():
+    interpreter = Interpreter()
     while True:
         expression = input('>>> ')
-        res = calc(expression)
-        print(res.value)
+        ast = get_ast(expression)
+        interpreter.set_node(ast)
+        print(interpreter.compute())
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
-    
