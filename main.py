@@ -332,7 +332,8 @@ class Interpreter:
     def input(self, expression: str) -> any:
         tokens = self.lexer.tokenize(expression)
         ast = self.parser.parse(tokens)
-        return self.__visit(ast).value
+        res = self.__visit(ast)
+        return res.value if res else ''
 
     def __visit(self, node: Node) -> Number | Variable:
         if isinstance(node, NumberNode):
